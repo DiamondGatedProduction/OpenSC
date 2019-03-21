@@ -27,7 +27,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/compat_strlcat.h"
 #include "common/compat_strlcpy.h"
 
 #include "internal.h"
@@ -44,7 +43,7 @@ static int sc_pkcs15emu_esteid2018_init(sc_pkcs15_card_t *p15card) {
 	sc_card_t *card = p15card->card;
 	u8 buff[128];
 	int r, i;
-	size_t field_length = 0, taglen;
+	size_t field_length = 0, taglen, j;
 	sc_path_t tmppath;
 
 	set_string(&p15card->tokeninfo->label, "ID-kaart");
@@ -59,11 +58,15 @@ static int sc_pkcs15emu_esteid2018_init(sc_pkcs15_card_t *p15card) {
 	if (tag == NULL)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 
-	for (size_t j = 0; j < taglen; j++)
+	for (j = 0; j < taglen; j++)
 		if (!isalnum(tag[j]))
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
-	p15card->tokeninfo->serial_number = strndup((const char *)tag, taglen);
-	p15card->tokeninfo->flags = SC_PKCS15_TOKEN_EID_COMPLIANT | SC_PKCS15_TOKEN_READONLY;
+	p15card->tokeninfo->serial_number = malloc(taglen + 1);
+	if (!p15card->tokeninfo->serial_number)
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+	p15card->tokeninfo->serial_number = memcpy(p15card->tokeninfo->serial_number, tag, taglen);
+	p15card->tokeninfo->serial_number[taglen] = '\0';
+	p15card->tokeninfo->flags = SC_PKCS15_TOKEN_READONLY;
 
 	/* add certificates */
 	for (i = 0; i < 2; i++) {
