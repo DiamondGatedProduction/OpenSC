@@ -32,6 +32,9 @@
 
 /* Helping defines */
 #define SIGNATURE_PAYLOAD_SIZE 0x30
+#define PIN1_REF 0x01
+#define PIN2_REF 0x85
+#define PUK_REF 0x02
 
 static const struct sc_atr_table esteid_atrs[] = {
     {"3b:db:96:00:80:b1:fe:45:1f:83:00:12:23:3f:53:65:49:44:0f:90:00:f1", NULL, "EstEID 2018", SC_CARD_TYPE_ESTEID_2018, 0, NULL},
@@ -106,7 +109,7 @@ static int esteid_select(struct sc_card *card, unsigned char p1, unsigned char i
 
 static int esteid_select_file(struct sc_card *card, const struct sc_path *in_path, struct sc_file **file_out) {
 	unsigned char pathbuf[SC_MAX_PATH_SIZE], *path = pathbuf;
-	int pathlen;
+	size_t pathlen;
 	struct sc_file *file = NULL;
 
 	LOG_FUNC_CALLED(card->ctx);
@@ -190,7 +193,8 @@ static int esteid_compute_signature(sc_card_t *card, const u8 *data, size_t data
 	struct esteid_priv_data *priv = DRVDATA(card);
 	struct sc_security_env *env = NULL;
 	struct sc_apdu apdu;
-	u8 sbuf[SIGNATURE_PAYLOAD_SIZE] = {0};
+	u8 sbuf[SIGNATURE_PAYLOAD_SIZE];
+	int le = MIN(SC_MAX_APDU_RESP_SIZE, MIN(SIGNATURE_PAYLOAD_SIZE * 2, outlen));
 
 	LOG_FUNC_CALLED(card->ctx);
 	if (data == NULL || out == NULL || datalen > SIGNATURE_PAYLOAD_SIZE)
@@ -204,10 +208,10 @@ static int esteid_compute_signature(sc_card_t *card, const u8 *data, size_t data
 
 	switch (env->key_ref[0]) {
 	case 1: /* authentication key */
-		sc_format_apdu_ex(card, &apdu, 0x88, 0, 0, sbuf, datalen, out, MIN(256, MIN(SIGNATURE_PAYLOAD_SIZE * 2, outlen)));
+		sc_format_apdu_ex(card, &apdu, 0x88, 0, 0, sbuf, datalen, out, le);
 		break;
 	default:
-		sc_format_apdu_ex(card, &apdu, 0x2A, 0x9E, 0x9A, sbuf, datalen, out, MIN(256, MIN(SIGNATURE_PAYLOAD_SIZE * 2, outlen)));
+		sc_format_apdu_ex(card, &apdu, 0x2A, 0x9E, 0x9A, sbuf, datalen, out, le);
 	}
 
 	SC_TRANSMIT_TEST_RET(card, apdu, "PSO CDS/INTERNAL AUTHENTICATE failed");
@@ -219,21 +223,20 @@ static int esteid_get_pin_remaining_tries(sc_card_t *card, int pin_reference) {
 	unsigned char get_pin_info[] = {0x4D, 0x08, 0x70, 0x06, 0xBF, 0x81, 0xFF, 0x02, 0xA0, 0x80};
 
 	struct sc_apdu apdu;
-	unsigned char apdu_resp[SC_MAX_APDU_BUFFER_SIZE];
+	unsigned char apdu_resp[SC_MAX_APDU_RESP_SIZE];
 	LOG_FUNC_CALLED(card->ctx);
 
 	// We don't get the file information here, so we need to be ugly
-	if (pin_reference == 1 || pin_reference == 2) {
+	if (pin_reference == PIN1_REF || pin_reference == PUK_REF) {
 		LOG_TEST_RET(card->ctx, esteid_select(card, 0x00, 0x3F, 0x00), "Cannot select MF");
-	} else if (pin_reference == 0x85) {
+	} else if (pin_reference == PIN2_REF) {
 		LOG_TEST_RET(card->ctx, esteid_select_file(card, &adf2, NULL), "Cannot select QSCD AID");
 	} else {
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	}
 
 	get_pin_info[6] = pin_reference & 0x0F; // mask out local/global
-	// XXX: handling of default Le of 0x00 could be easier
-	sc_format_apdu_ex(card, &apdu, 0xCB, 0x3F, 0xFF, get_pin_info, sizeof(get_pin_info), apdu_resp, MIN(256, sizeof(apdu_resp)));
+	sc_format_apdu_ex(card, &apdu, 0xCB, 0x3F, 0xFF, get_pin_info, sizeof(get_pin_info), apdu_resp, sizeof(apdu_resp));
 	SC_TRANSMIT_TEST_RET(card, apdu, "GET DATA(pin info) failed");
 
 	// XXX: sc_asn1_find_tag with the following payload (to get to tag 0x9B):
@@ -260,17 +263,16 @@ static int esteid_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data, int *tr
 		// VERIFY
 		memcpy(&tmp, data, sizeof(struct sc_pin_cmd_data));
 		tmp.cmd = SC_PIN_CMD_VERIFY;
-		tmp.pin_reference = 0x02; // hardcoded, ugly
+		tmp.pin_reference = PUK_REF;
 		tmp.pin2.len = 0;
 		r = iso_ops->pin_cmd(card, &tmp, tries_left);
-		sc_mem_clear(&tmp, sizeof(tmp));
 		LOG_TEST_RET(card->ctx, r, "VERIFY during unblock failed");
 
 		if (data->pin_reference == 0x85) {
 			LOG_TEST_RET(card->ctx, esteid_select_file(card, &adf2, NULL), "Cannot select QSCD AID");
 		}
 		// UNBLOCK
-		memcpy(&tmp, data, sizeof(struct sc_pin_cmd_data));
+		tmp = *data;
 		tmp.cmd = SC_PIN_CMD_UNBLOCK;
 		tmp.pin1.len = 0;
 		r = iso_ops->pin_cmd(card, &tmp, tries_left);
