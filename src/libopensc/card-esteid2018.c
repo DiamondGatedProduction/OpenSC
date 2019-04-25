@@ -125,7 +125,7 @@ static int esteid_select_file(struct sc_card *card, const struct sc_path *in_pat
 	while (pathlen >= 2) {
 		if (memcmp(path, "\x3F\x00", 2) == 0) {
 			LOG_TEST_RET(card->ctx, esteid_select(card, 0x00, 0x3F, 0x00), "MF select failed");
-		} else if (pathlen >= 2 && path[0] == 0xAD) {
+		} else if (path[0] == 0xAD) {
 			LOG_TEST_RET(card->ctx, esteid_select(card, 0x01, path[0], path[1]), "DF select failed");
 		} else if (pathlen == 2) {
 			LOG_TEST_RET(card->ctx, esteid_select(card, 0x02, path[0], path[1]), "EF select failed");
@@ -136,6 +136,7 @@ static int esteid_select_file(struct sc_card *card, const struct sc_path *in_pat
 				if (file == NULL)
 					LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 				file->path = *in_path;
+				file->size = 1536; // Dummy size, to be above 1024
 
 				*file_out = file;
 			}
