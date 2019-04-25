@@ -242,7 +242,7 @@ static int esteid_get_pin_remaining_tries(sc_card_t *card, int pin_reference) {
 
 	// XXX: sc_asn1_find_tag with the following payload (to get to tag 0x9B):
 	// https://lapo.it/asn1js/#cB6_gQEaoBiaAQObAQOhEIwG8wAAc0MAnAbzAABzQwA
-	return apdu_resp[13];
+	return (int)apdu_resp[13];
 }
 
 static int esteid_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data, int *tries_left) {
